@@ -14,6 +14,8 @@ DEFAULT_CHUNK_SIZE = 500
 DEFAULT_CHUNK_OVERLAP = 50
 DEFAULT_MAX_FILE_BYTES = 64 * 1024 * 1024
 DEFAULT_EMBEDDING_BATCH_SIZE = 32
+DEFAULT_CROSS_ENCODER = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+DEFAULT_FOUNDRY_MODEL = "claude-opus-5"
 
 
 @dataclass(frozen=True)
@@ -27,6 +29,10 @@ class Settings:
     data_dir: Path
     chroma_dir: Path
     collection_name: str
+    cross_encoder_model: str
+    foundry_api_key: str | None
+    foundry_resource: str | None
+    foundry_model: str
 
 
 def get_settings() -> Settings:
@@ -45,7 +51,22 @@ def get_settings() -> Settings:
         data_dir=data_dir,
         chroma_dir=chroma_dir,
         collection_name=_env_str("COLLECTION_NAME", "policies"),
+        cross_encoder_model=_env_str("CROSS_ENCODER_MODEL", DEFAULT_CROSS_ENCODER),
+        foundry_api_key=_blank_to_none(os.getenv("ANTHROPIC_FOUNDRY_API_KEY")),
+        foundry_resource=_blank_to_none(os.getenv("ANTHROPIC_FOUNDRY_RESOURCE")),
+        foundry_model=(
+            os.getenv("ANTHROPIC_MODEL")
+            or os.getenv("ANTHROPIC_DEFAULT_OPUS_MODEL")
+            or DEFAULT_FOUNDRY_MODEL
+        ),
     )
+
+
+def _blank_to_none(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
 
 
 def _env_str(name: str, default: str) -> str:
