@@ -3,7 +3,7 @@
 import math
 from dataclasses import dataclass
 
-from rag.chunking import Chunk
+from rag.chunking import Chunk, section_for
 from rag.documents import DocumentSource, SkippedFile
 from rag.vector_store import ChromaStore, RetrievalHit
 
@@ -31,9 +31,11 @@ class IndexingPipeline:
     def index(self) -> IndexReport:
         """Chunk and embed each policy file, then save the chunks.
 
-        An empty file deletes that file's old rows. A shorter file drops the
+        A file that is gone, or an empty file, deletes that file's old rows
+        for this chunker. A failed re-read keeps the rows already stored. A
+        superseded file is deleted and not stored. A shorter file drops the
         chunk ids it no longer has. A bad embedding skips that file and leaves
-        the others in place.
+        its previous rows in place.
         """
 
         documents, skipped = self.source.load()
@@ -41,11 +43,23 @@ class IndexingPipeline:
         files_indexed: list[str] = []
         chunks_stored = 0
 
+        seen = {document.name for document in documents}
+        seen.update(item.name for item in skipped)
+        for name in self.store.sources_for(self.chunker.name):
+            if name not in seen:
+                self.store.delete_source(name, self.chunker.name)
+                skipped.append(SkippedFile(name, "absent"))
+
         for item in skipped:
             if item.reason == "empty":
                 self.store.delete_source(item.name, self.chunker.name)
 
         for document in documents:
+            if document.status == "superseded":
+                self.store.delete_source(document.name, self.chunker.name)
+                skipped.append(SkippedFile(document.name, "superseded"))
+                continue
+
             chunks = self.chunker.chunk(document.text)
             try:
                 vectors = self._embed(chunks)
@@ -63,6 +77,7 @@ class IndexingPipeline:
                         "source": document.name,
                         "chunk_index": chunk.index,
                         "strategy": chunk.strategy,
+                        "section": section_for(document.text, chunk.text, end=chunk.end),
                     }
                     for chunk in chunks
                 ],
