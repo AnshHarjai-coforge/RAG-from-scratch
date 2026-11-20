@@ -3,6 +3,48 @@
 from dataclasses import dataclass
 
 
+def section_for(document: str, chunk_text: str, end: int | None = None) -> str:
+    """Return the last markdown heading at or before the end of this chunk.
+
+    A heading is a line that starts with ``#``. The returned text has those
+    marks removed. A chunk that ends before any heading is ``body``.
+    When end is provided, a heading line already started by that index
+    contributes its full title.
+    """
+
+    text = document.strip()
+    if end is not None:
+        heading = "body"
+        line_start = 0
+        for line in text.splitlines(keepends=True):
+            if line_start >= end:
+                break
+            stripped = line.strip()
+            line_start += len(line)
+            if not stripped.startswith("#"):
+                continue
+            title = stripped.lstrip("#").strip()
+            if title:
+                heading = title
+        return heading
+
+    piece = chunk_text.strip()
+    if not piece:
+        return "body"
+
+    start = text.find(piece)
+    window = text[: start + len(piece)] if start >= 0 else piece
+    heading = "body"
+    for line in window.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("#"):
+            continue
+        title = stripped.lstrip("#").strip()
+        if title:
+            heading = title
+    return heading
+
+
 @dataclass(frozen=True)
 class Chunk:
     """One piece of a document. ``index`` starts at 0 for each file."""
@@ -10,6 +52,8 @@ class Chunk:
     text: str
     index: int
     strategy: str
+    start: int | None = None
+    end: int | None = None
 
 
 class FixedSizeChunker:
@@ -34,9 +78,17 @@ class FixedSizeChunker:
         if not normalized:
             return []
         if len(normalized) <= self.chunk_size:
-            return [Chunk(text=normalized, index=0, strategy=self.name)]
+            return [
+                Chunk(
+                    text=normalized,
+                    index=0,
+                    strategy=self.name,
+                    start=0,
+                    end=len(normalized),
+                )
+            ]
 
-        pieces: list[str] = []
+        chunks: list[Chunk] = []
         start = 0
         length = len(normalized)
         while start < length:
@@ -47,7 +99,15 @@ class FixedSizeChunker:
                     end = whitespace_at
             piece = normalized[start:end].strip()
             if piece:
-                pieces.append(piece)
+                chunks.append(
+                    Chunk(
+                        text=piece,
+                        index=len(chunks),
+                        strategy=self.name,
+                        start=start,
+                        end=end,
+                    )
+                )
             if end >= length:
                 break
             next_start = end - self.overlap
@@ -55,9 +115,7 @@ class FixedSizeChunker:
                 next_start = end
             start = next_start
 
-        return [
-            Chunk(text=piece, index=index, strategy=self.name) for index, piece in enumerate(pieces)
-        ]
+        return chunks
 
     @staticmethod
     def _last_whitespace(text: str, start: int, end: int) -> int | None:
