@@ -1,5 +1,6 @@
 """Read policy markdown files one at a time."""
 
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,6 +14,7 @@ class SourceDocument:
 
     name: str
     text: str
+    status: str = "current"
 
 
 @dataclass(frozen=True)
@@ -23,8 +25,25 @@ class SkippedFile:
     reason: str
 
 
+def _opening_status(text: str) -> str:
+    """Return front-matter status, or current when it is absent."""
+
+    lines = text.lstrip().splitlines()
+    if not lines or lines[0] != "---":
+        return "current"
+    status = "current"
+    for line in lines[1:]:
+        if line == "---":
+            break
+        if line.startswith("status:"):
+            value = line.removeprefix("status:").strip().lower()
+            if value:
+                status = value
+    return status
+
+
 class DocumentSource:
-    """Load every markdown file in one directory with ``read_text``."""
+    """Load ``.md`` and ``.markdown`` files, any case, in one directory."""
 
     def __init__(self, directory: Path, max_bytes: int = DEFAULT_MAX_BYTES) -> None:
         if max_bytes <= 0:
@@ -38,9 +57,15 @@ class DocumentSource:
 
         documents: list[SourceDocument] = []
         skipped: list[SkippedFile] = []
-        for path in sorted(self.directory.glob("*.md")):
+        for path in sorted(self.directory.iterdir()):
+            if path.suffix.lower() not in {".md", ".markdown"}:
+                continue
             try:
-                if path.stat().st_size > self.max_bytes:
+                file_stat = path.stat()
+                if not stat.S_ISREG(file_stat.st_mode):
+                    skipped.append(SkippedFile(path.name, "not_a_regular_file"))
+                    continue
+                if file_stat.st_size > self.max_bytes:
                     skipped.append(SkippedFile(path.name, "too_large"))
                     continue
                 text = path.read_text(encoding="utf-8")
@@ -53,5 +78,5 @@ class DocumentSource:
             if not text.strip():
                 skipped.append(SkippedFile(path.name, "empty"))
                 continue
-            documents.append(SourceDocument(path.name, text))
+            documents.append(SourceDocument(path.name, text, status=_opening_status(text)))
         return documents, skipped

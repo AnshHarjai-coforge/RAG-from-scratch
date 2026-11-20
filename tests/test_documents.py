@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -78,3 +79,66 @@ def test_files_over_the_cap_are_skipped_and_smaller_files_are_read(tmp_path):
 def test_max_bytes_must_be_positive(tmp_path):
     with pytest.raises(ValueError):
         DocumentSource(tmp_path, max_bytes=0)
+
+
+def test_unreadable_directory_raises_permission_error(tmp_path):
+    blocked = tmp_path / "locked"
+    blocked.mkdir()
+    blocked.chmod(0o000)
+    try:
+        with pytest.raises(PermissionError):
+            DocumentSource(blocked).load()
+    finally:
+        blocked.chmod(0o700)
+
+
+def test_fifo_is_skipped_and_regular_markdown_is_loaded(tmp_path):
+    os.mkfifo(tmp_path / "pipe.md")
+    (tmp_path / "good.md").write_text("readable", encoding="utf-8")
+
+    documents, skipped = DocumentSource(tmp_path).load()
+
+    assert [document.name for document in documents] == ["good.md"]
+    assert documents[0].text == "readable"
+    assert [(item.name, item.reason) for item in skipped] == [("pipe.md", "not_a_regular_file")]
+
+
+def test_markdown_suffixes_any_case_are_loaded_in_name_order(tmp_path):
+    (tmp_path / "Report.MD").write_text("report", encoding="utf-8")
+    (tmp_path / "note.markdown").write_text("note", encoding="utf-8")
+    (tmp_path / "notes.txt").write_text("ignore me", encoding="utf-8")
+    (tmp_path / "Note.MD").write_text(" \n", encoding="utf-8")
+
+    documents, skipped = DocumentSource(tmp_path).load()
+
+    assert [document.name for document in documents] == ["Report.MD", "note.markdown"]
+    assert [document.text for document in documents] == ["report", "note"]
+    assert [(item.name, item.reason) for item in skipped] == [("Note.MD", "empty")]
+
+
+def test_status_comes_from_opening_front_matter_only(tmp_path):
+    (tmp_path / "superseded.md").write_text(
+        "---\nstatus: superseded\n---\n\n# Title\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "current.md").write_text(
+        "---\ntitle: Remote Work\nstatus: Current\n---\n\n# Title\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "plain.md").write_text("# Title\n", encoding="utf-8")
+    (tmp_path / "body.md").write_text("# Title\n\nstatus: superseded\n", encoding="utf-8")
+    (tmp_path / "later.md").write_text(
+        "---\nstatus: current\n---\n\nstatus: superseded\n",
+        encoding="utf-8",
+    )
+
+    documents, skipped = DocumentSource(tmp_path).load()
+    by_name = {document.name: document for document in documents}
+
+    assert skipped == []
+    assert by_name["superseded.md"].status == "superseded"
+    assert by_name["superseded.md"].text.startswith("---\nstatus: superseded\n")
+    assert by_name["current.md"].status == "current"
+    assert by_name["plain.md"].status == "current"
+    assert by_name["body.md"].status == "current"
+    assert by_name["later.md"].status == "current"
