@@ -49,4 +49,4 @@ Employees must not approve their own expenses. Managers must route their own cla
 
 ## 7. Exceptions and questions
 
-Exceptions require written approval from the department head and Finance before the expense is incurred, except in a documented emergency. Finance may publish supplementary destination guidance without changing the core requirements of this policy. Questions should be sent to finance@northstaranalytics.example.
+Exceptions require written approval from the department head and Finance before the expense is incurred, except in a documented emergency. A one-time exception that Finance has already approved is recorded under exception code EXP-214. Finance may publish supplementary destination guidance without changing the core requirements of this policy. Questions should be sent to finance@northstaranalytics.example.
