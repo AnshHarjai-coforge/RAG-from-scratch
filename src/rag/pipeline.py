@@ -1,6 +1,7 @@
 """Index policy files and retrieve the closest chunks."""
 
 import math
+import re
 from dataclasses import dataclass
 
 from rag.chunking import Chunk, section_for
@@ -120,6 +121,34 @@ class IndexingPipeline:
             strategy=selected,
         )
 
+    def retrieve_hybrid(
+        self,
+        question: str,
+        top_k: int = 3,
+        strategy: str | None = None,
+    ) -> list[RetrievalHit]:
+        """Return keyword matches first, then the closest vector hits.
+
+        A bounded match of the whole question or a code such as ``EXP-214``
+        comes first, and the list is never longer than ``top_k``. A blank
+        question or a top_k below 1 is rejected before the embedder runs.
+        """
+
+        if top_k < 1:
+            raise ValueError("top_k must be at least 1")
+        if not question.strip():
+            raise ValueError("question must not be empty")
+        selected = self.chunker.name if strategy is None else strategy
+        count = self.store.count_for(selected)
+        if count == 0:
+            return []
+        ranked = self.store.query(
+            self.embedder.embed_query(question),
+            top_k=count,
+            strategy=selected,
+        )
+        return merge_hits(keyword_hits(ranked, question), ranked[:top_k])[:top_k]
+
     def _embed(self, chunks: list[Chunk]) -> list[list[float]]:
         """Embed these chunks. A missing or non-finite vector raises ValueError."""
 
@@ -130,3 +159,42 @@ class IndexingPipeline:
             if not vector or any(not math.isfinite(value) for value in vector):
                 raise ValueError("embedding contains a non-finite value")
         return vectors
+
+
+_CODE = re.compile(r"(?<![a-z0-9-])(?=[a-z0-9-]*\d)[a-z]{2,}(?:-[a-z0-9]+)+(?![a-z0-9-])")
+
+
+def _bounded(text: str) -> re.Pattern[str]:
+    """Match ``text`` only when it is not part of a longer token."""
+
+    return re.compile(r"(?<![a-z0-9-])" + re.escape(text) + r"(?![a-z0-9-])")
+
+
+def keyword_hits(hits: list[RetrievalHit], question: str) -> list[RetrievalHit]:
+    """Return chunks that contain the question or a code inside it as a whole token.
+
+    The match is bounded, so a shorter string is not found inside a longer word or id.
+    """
+
+    needle = question.lower()
+    whole = _bounded(needle)
+    codes = [_bounded(code) for code in _CODE.findall(needle)]
+    matched = []
+    for hit in hits:
+        text = hit.text.lower()
+        if whole.search(text) or any(code.search(text) for code in codes):
+            matched.append(hit)
+    return matched
+
+
+def merge_hits(keyword: list[RetrievalHit], vector: list[RetrievalHit]) -> list[RetrievalHit]:
+    """Put keyword matches first, then vector hits that are not already included."""
+
+    merged: list[RetrievalHit] = []
+    seen: set[str] = set()
+    for hit in keyword + vector:
+        if hit.id in seen:
+            continue
+        seen.add(hit.id)
+        merged.append(hit)
+    return merged

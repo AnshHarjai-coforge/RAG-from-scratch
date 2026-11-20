@@ -2,8 +2,8 @@ import pytest
 
 from rag.chunking import Chunk, FixedSizeChunker, section_for
 from rag.documents import DocumentSource
-from rag.pipeline import IndexingPipeline
-from rag.vector_store import ChromaStore
+from rag.pipeline import IndexingPipeline, keyword_hits, merge_hits
+from rag.vector_store import ChromaStore, RetrievalHit
 
 
 class KeywordEmbedder:
@@ -311,6 +311,64 @@ def test_index_stores_the_section_for_each_chunk(tmp_path):
     assert hits[0].metadata["section"] == section_for(text, hits[0].text)
 
 
+def test_hybrid_puts_an_exact_code_ahead_of_the_vector_hit(tmp_path):
+    pipeline = _pipeline(
+        tmp_path,
+        {
+            "expense.md": "Remote staff use exception code EXP-214 for a late report.",
+            "other.md": "The holiday calendar is posted once a year.",
+        },
+        chunker=LabelChunker(),
+    )
+    pipeline.index()
+
+    vector = pipeline.retrieve("EXP-214", top_k=1)
+    hybrid = pipeline.retrieve_hybrid("EXP-214", top_k=1)
+
+    assert vector[0].metadata["source"] == "other.md"
+    assert len(hybrid) == 1
+    assert hybrid[0].metadata["source"] == "expense.md"
+    assert hybrid[0].distance == pytest.approx(1.0)
+
+
+def test_hybrid_finds_a_code_inside_a_longer_question(tmp_path):
+    pipeline = _pipeline(
+        tmp_path,
+        {
+            "expense.md": "Finance records exception code EXP-214.",
+            "remote.md": "Employees may work remote for two days.",
+        },
+        chunker=LabelChunker(),
+    )
+    pipeline.index()
+    question = "How many remote days does EXP-214 allow?"
+
+    vector = pipeline.retrieve(question, top_k=1)
+    hybrid = pipeline.retrieve_hybrid(question, top_k=1)
+
+    assert vector[0].metadata["source"] == "remote.md"
+    assert len(hybrid) == 1
+    assert hybrid[0].metadata["source"] == "expense.md"
+
+
+def test_hybrid_keeps_vector_order_when_no_chunk_contains_the_question(tmp_path):
+    pipeline = _pipeline(
+        tmp_path,
+        {
+            "remote.md": "Employees may work remote for two days.",
+            "expense.md": "Submit an expense report within thirty days.",
+        },
+        chunker=LabelChunker(),
+    )
+    pipeline.index()
+    question = "How many remote days are allowed?"
+
+    vector = pipeline.retrieve(question, top_k=2)
+    hybrid = pipeline.retrieve_hybrid(question, top_k=2)
+
+    assert [hit.id for hit in hybrid] == [hit.id for hit in vector]
+
+
 def test_blank_question_and_bad_top_k_are_rejected(tmp_path):
     pipeline = _pipeline(tmp_path, {"remote.md": "remote work"})
     pipeline.index()
@@ -320,6 +378,18 @@ def test_blank_question_and_bad_top_k_are_rejected(tmp_path):
 
     with pytest.raises(ValueError):
         pipeline.retrieve("remote", top_k=0)
+
+    with pytest.raises(ValueError):
+        pipeline.retrieve_hybrid("  ")
+
+    with pytest.raises(ValueError):
+        pipeline.retrieve_hybrid("remote", top_k=0)
+
+
+def test_hybrid_on_an_empty_store_returns_nothing(tmp_path):
+    pipeline = _pipeline(tmp_path, {"remote.md": "remote work"})
+
+    assert pipeline.retrieve_hybrid("remote work") == []
 
 
 def test_embedder_that_returns_the_wrong_count_skips_the_file(tmp_path):
@@ -346,3 +416,41 @@ def test_embedder_that_returns_the_wrong_count_skips_the_file(tmp_path):
     assert report.files_indexed == []
     assert any(item.reason == "invalid_embeddings" for item in report.skipped)
     assert pipeline.store.ids_for("remote.md", "fixed") == []
+
+
+def test_merge_hits_keeps_a_shared_id_once():
+    keyword = RetrievalHit("same", "EXP-214", 0.2, {})
+    vector = RetrievalHit("same", "EXP-214", 0.8, {})
+    other = RetrievalHit("other", "holiday", 0.9, {})
+
+    merged = merge_hits([keyword], [vector, other])
+
+    assert [hit.id for hit in merged] == ["same", "other"]
+    assert merged[0].distance == 0.2
+
+
+def test_keyword_hits_matches_a_whole_token_only():
+    laptop = RetrievalHit(
+        id="laptop",
+        text="Northstar may provide a laptop",
+        distance=0.2,
+        metadata={},
+    )
+    expense = RetrievalHit(
+        id="expense",
+        text="Remote staff use exception code EXP-214 for a late report.",
+        distance=0.4,
+        metadata={},
+    )
+    policy = RetrievalHit(
+        id="policy",
+        text="See HR-POL-001 for the rule.",
+        distance=0.6,
+        metadata={},
+    )
+
+    assert keyword_hits([laptop], "PTO") == []
+    assert keyword_hits([expense], "EXP-21") == []
+    assert keyword_hits([policy], "POL-00") == []
+    assert keyword_hits([expense], "EXP-214") == [expense]
+    assert keyword_hits([policy], "HR-POL-001") == [policy]
