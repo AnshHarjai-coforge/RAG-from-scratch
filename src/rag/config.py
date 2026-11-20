@@ -32,25 +32,42 @@ class Settings:
 def get_settings() -> Settings:
     load_dotenv()
     root = Path(__file__).resolve().parents[2]
-    data_dir = _under_root(root, os.getenv("DATA_DIR", "data/policies"))
-    chroma_dir = _under_root(root, os.getenv("CHROMA_DIR", "data/chroma"))
+    data_dir = _under_root(root, _env_str("DATA_DIR", "data/policies"))
+    chroma_dir = _under_root(root, _env_str("CHROMA_DIR", "data/chroma"))
 
     return Settings(
-        embedding_model=os.getenv("EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-0.6B"),
-        embedding_batch_size=int(
-            os.getenv("EMBEDDING_BATCH_SIZE", str(DEFAULT_EMBEDDING_BATCH_SIZE))
-        ),
-        chunk_size=int(os.getenv("CHUNK_SIZE", str(DEFAULT_CHUNK_SIZE))),
-        chunk_overlap=int(os.getenv("CHUNK_OVERLAP", str(DEFAULT_CHUNK_OVERLAP))),
-        top_k=int(os.getenv("TOP_K", "3")),
-        max_file_bytes=int(os.getenv("MAX_FILE_BYTES", str(DEFAULT_MAX_FILE_BYTES))),
+        embedding_model=_env_str("EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-0.6B"),
+        embedding_batch_size=_env_int("EMBEDDING_BATCH_SIZE", DEFAULT_EMBEDDING_BATCH_SIZE),
+        chunk_size=_env_int("CHUNK_SIZE", DEFAULT_CHUNK_SIZE),
+        chunk_overlap=_env_int("CHUNK_OVERLAP", DEFAULT_CHUNK_OVERLAP),
+        top_k=_env_int("TOP_K", 3),
+        max_file_bytes=_env_int("MAX_FILE_BYTES", DEFAULT_MAX_FILE_BYTES),
         data_dir=data_dir,
         chroma_dir=chroma_dir,
-        collection_name=os.getenv("COLLECTION_NAME", "policies"),
+        collection_name=_env_str("COLLECTION_NAME", "policies"),
     )
 
 
+def _env_str(name: str, default: str) -> str:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name}={raw!r} is not an integer") from exc
+
+
 def _under_root(root: Path, value: str) -> Path:
+    if not value.strip():
+        raise ValueError("path must not be blank")
     path = Path(value)
     if path.is_absolute():
         return path
