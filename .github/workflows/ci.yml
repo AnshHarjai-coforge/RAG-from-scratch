@@ -35,13 +35,4 @@ jobs:
           pip install -r requirements.txt
           pip install -e .
       - name: Run tests
-        run: |
-          set +e
-          pytest
-          status=$?
-          set -e
-          if [ "$status" -eq 5 ]; then
-            echo "No tests collected."
-            exit 0
-          fi
-          exit "$status"
+        run: pytest
