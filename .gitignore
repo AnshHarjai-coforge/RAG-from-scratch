@@ -149,6 +149,9 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
+# Local vector index
+data/chroma/
+
 # Environments
 .env
 .envrc
