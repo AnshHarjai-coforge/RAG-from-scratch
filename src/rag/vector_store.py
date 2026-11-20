@@ -42,8 +42,10 @@ class ChromaStore:
     ) -> None:
         """Write chunks. An id that already exists replaces that row.
 
-        The four lists line up: index 0 of each list is one chunk. A long
-        write is split into batches Chroma will accept.
+        The four lists line up: index 0 of each list is one chunk. Duplicate
+        ids in one call, and embedding vectors of different lengths, are
+        rejected before anything is written. A long write is split into batches
+        Chroma will accept.
         """
 
         count = len(ids)
@@ -51,6 +53,18 @@ class ChromaStore:
             raise ValueError("ids, documents, embeddings, and metadata must be the same length")
         if count == 0:
             return
+        if len(ids) != len(set(ids)):
+            seen: set[str] = set()
+            duplicates: list[str] = []
+            for chunk_id in ids:
+                if chunk_id in seen and chunk_id not in duplicates:
+                    duplicates.append(chunk_id)
+                seen.add(chunk_id)
+            named = ", ".join(repr(chunk_id) for chunk_id in duplicates)
+            raise ValueError(f"duplicate ids: {named}")
+        lengths = {len(vector) for vector in embeddings}
+        if len(lengths) != 1:
+            raise ValueError("embedding vectors must all be the same length")
 
         batch_size = self.client.get_max_batch_size()
         for start in range(0, count, batch_size):
@@ -107,6 +121,55 @@ class ChromaStore:
         where = {"$and": [{"source": source}, {"strategy": strategy}]}
         result = self.collection.get(where=where, include=[])
         return list(result["ids"])
+
+    def rows_for(self, strategy: str) -> list[RetrievalHit]:
+        """Return every stored chunk for one chunking strategy.
+
+        This reads rows by metadata. It does not rank them, so ``distance`` is 0.
+        """
+
+        result = self.collection.get(
+            where={"strategy": strategy},
+            include=["documents", "metadatas"],
+        )
+        documents = result["documents"] or []
+        metadatas = result["metadatas"] or []
+        hits: list[RetrievalHit] = []
+        for chunk_id, text, metadata in zip(result["ids"], documents, metadatas):
+            hits.append(
+                RetrievalHit(
+                    id=chunk_id,
+                    text=text or "",
+                    distance=0.0,
+                    metadata=dict(metadata or {}),
+                )
+            )
+        return hits
+
+    def sources_for(self, strategy: str) -> list[str]:
+        """Return the unique source names stored for one chunking strategy.
+
+        Rows with no source are skipped. The names are sorted.
+        """
+
+        result = self.collection.get(where={"strategy": strategy}, include=["metadatas"])
+        sources: set[str] = set()
+        for metadata in result["metadatas"] or []:
+            if not metadata:
+                continue
+            source = metadata.get("source")
+            if isinstance(source, str) and source:
+                sources.add(source)
+        return sorted(sources)
+
+    def count_for(self, strategy: str) -> int:
+        """Return how many chunks are stored for one chunking strategy.
+
+        This counts rows by metadata. It does not rank them.
+        """
+
+        result = self.collection.get(where={"strategy": strategy}, include=[])
+        return len(result["ids"])
 
     def delete_ids(self, ids: list[str]) -> None:
         """Delete these rows. An empty list does nothing."""
