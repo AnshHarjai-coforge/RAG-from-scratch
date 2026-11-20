@@ -1,62 +1,22 @@
-"""Chunking strategies for the policy index.
+"""Split a policy document into fixed-size pieces."""
 
-``IndexingPipeline`` depends on the ``Chunker`` protocol, not on one
-strategy. ``FixedSizeChunker`` is the strategy used now. A later strategy
-implements the same protocol and is passed into the pipeline in its place:
-
-- structural chunking splits on document structure such as headings
-- semantic chunking splits where the topic changes
-- parent-child chunking returns small retrieval chunks and carries the
-  parent context in ``Chunk.extra`` (for example ``parent_id`` or ``section``)
-
-Strategy-specific metadata belongs in ``Chunk.extra``. The pipeline copies
-those fields onto each stored row. Record ids include the strategy name, so
-two strategies can live in one collection and be retrieved separately.
-"""
-
-from collections.abc import Mapping
-from dataclasses import dataclass, field
-from typing import Protocol
-
-MetadataValue = str | int | float | bool
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class Chunk:
-    """One retrievable piece of a document.
-
-    ``index`` is unique for a single document and strategy. ``extra`` holds
-    fields a strategy needs beyond the text, such as a section title or a
-    parent id. Values must be scalars Chroma can store.
-    """
+    """One piece of a document. ``index`` starts at 0 for each file."""
 
     text: str
     index: int
     strategy: str
-    extra: Mapping[str, MetadataValue] = field(default_factory=dict)
-
-
-class Chunker(Protocol):
-    """A replaceable way to turn one document into chunks."""
-
-    name: str
-
-    def chunk(self, text: str) -> list[Chunk]:
-        """Split ``text`` into chunks. Empty input returns an empty list."""
 
 
 class FixedSizeChunker:
-    """Split text into fixed character windows with overlap.
+    """Split text into character windows with overlap.
 
-    A 500-character window is about one policy rule, which is the unit a
-    question should retrieve. The 50-character overlap is 10 percent of that
-    window, so a sentence that lands on a cut still appears whole in the next
-    chunk. The model context window is far larger than 500 characters. The
-    size is chosen for retrieval precision.
-
-    The chunker ends a window on whitespace when that break leaves room for
-    the overlap to advance. A span with no usable whitespace is cut at
-    ``chunk_size`` so the window always moves forward.
+    A window ends on whitespace when that break leaves room for the overlap
+    to move forward. A span with no usable whitespace is cut at ``chunk_size``.
     """
 
     name = "fixed"
@@ -74,7 +34,7 @@ class FixedSizeChunker:
         if not normalized:
             return []
         if len(normalized) <= self.chunk_size:
-            return [self._make(normalized, 0)]
+            return [Chunk(text=normalized, index=0, strategy=self.name)]
 
         pieces: list[str] = []
         start = 0
@@ -95,10 +55,9 @@ class FixedSizeChunker:
                 next_start = end
             start = next_start
 
-        return [self._make(piece, index) for index, piece in enumerate(pieces)]
-
-    def _make(self, text: str, index: int) -> Chunk:
-        return Chunk(text=text, index=index, strategy=self.name)
+        return [
+            Chunk(text=piece, index=index, strategy=self.name) for index, piece in enumerate(pieces)
+        ]
 
     @staticmethod
     def _last_whitespace(text: str, start: int, end: int) -> int | None:

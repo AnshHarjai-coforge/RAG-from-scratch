@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-# Max File size is 64 MB
+# Skip a file larger than this instead of reading it into memory.
 DEFAULT_MAX_BYTES = 64 * 1024 * 1024
 
 
@@ -24,12 +24,7 @@ class SkippedFile:
 
 
 class DocumentSource:
-    """Load every markdown file in a directory the same way.
-
-    Each file is read completely with ``read_text``. Files at 5 KB and files
-    at several megabytes use that same call. A file larger than ``max_bytes``
-    is skipped. That limit is a safety cap, not a second reader.
-    """
+    """Load every markdown file in one directory with ``read_text``."""
 
     def __init__(self, directory: Path, max_bytes: int = DEFAULT_MAX_BYTES) -> None:
         if max_bytes <= 0:
