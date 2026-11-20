@@ -3,9 +3,9 @@
 import math
 from dataclasses import dataclass
 
-from chunking import Chunk
-from documents import DocumentSource, SkippedFile
-from vector_store import ChromaStore, RetrievalHit
+from rag.chunking import Chunk
+from rag.documents import DocumentSource, SkippedFile
+from rag.vector_store import ChromaStore, RetrievalHit
 
 
 @dataclass(frozen=True)

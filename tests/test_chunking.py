@@ -1,6 +1,6 @@
 import pytest
 
-from chunking import FixedSizeChunker
+from rag.chunking import FixedSizeChunker
 
 
 def test_empty_and_whitespace_return_no_chunks():

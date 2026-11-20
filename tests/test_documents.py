@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from documents import DocumentSource
+from rag.documents import DocumentSource
 
 
 def test_missing_directory_raises(tmp_path):

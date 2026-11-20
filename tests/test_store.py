@@ -1,7 +1,7 @@
 import chromadb
 import pytest
 
-from vector_store import ChromaStore
+from rag.vector_store import ChromaStore
 
 
 def _store(tmp_path) -> ChromaStore:

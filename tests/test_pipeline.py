@@ -1,9 +1,9 @@
 import pytest
 
-from chunking import Chunk, FixedSizeChunker
-from documents import DocumentSource
-from pipeline import IndexingPipeline
-from vector_store import ChromaStore
+from rag.chunking import Chunk, FixedSizeChunker
+from rag.documents import DocumentSource
+from rag.pipeline import IndexingPipeline
+from rag.vector_store import ChromaStore
 
 
 class KeywordEmbedder:
